@@ -191,9 +191,15 @@ const ReminderSystem = () => {
     const startLongPolling = async () => {
       try {
         // جلب الإشعارات بواسطة long polling
-        const response = await fetch(`${apiBaseUrl}/notifications/poll?timestamp=${Date.now()}`);
+        const response = await fetch(`${apiBaseUrl}/notifications/poll?timestamp=${Date.now()}`, {
+          // إضافة timeout لمنع استمرار الاتصال لوقت طويل
+          signal: AbortSignal.timeout(30000) // 30 ثانية
+        }).catch(error => {
+          console.log("Long polling fetch error (expected):", error.name);
+          return null;
+        });
         
-        if (response.ok) {
+        if (response && response.ok) {
           const data = await response.json();
           
           // تحديث الإشعارات إذا كانت هناك إشعارات جديدة
@@ -203,19 +209,22 @@ const ReminderSystem = () => {
           }
         }
       } catch (error) {
-        console.error("Long polling error:", error);
+        // من المتوقع أن يكون هناك أخطاء بسبب timeout، لا داعي لتسجيلها
+        if (!(error instanceof DOMException && error.name === "TimeoutError")) {
+          console.error("Long polling error:", error);
+        }
       } finally {
-        // إعادة بدء long polling بعد فترة قصيرة
-        setTimeout(startLongPolling, 3000);
+        // إعادة بدء long polling بعد فترة قصيرة للتأكد من عدم إرهاق الخادم
+        setTimeout(startLongPolling, 5000);
       }
     };
     
     // بدء عملية long polling
     startLongPolling();
     
-    // تنظيف عند إلغاء التركيب (لن يتم تنفيذها عمليًا بسبب setTimeout)
+    // تنظيف عند إلغاء التركيب
     return () => {};
-  }, []);
+  }, [apiBaseUrl]);
 
   // إخفاء الإشعار تلقائيًا بعد المدة المحددة وتسجيله كإشعار تم عرضه
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Phone, ThumbsUp, ArrowLeft, Check } from "lucide-react";
+import { Phone, ThumbsUp, ArrowLeft, Check, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
@@ -12,37 +12,106 @@ const Contact = () => {
   const [likesCount, setLikesCount] = useState(0);
   const [hasLiked, setHasLiked] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [visitorCode, setVisitorCode] = useState<string | null>(null);
+  const [isServerConnected, setIsServerConnected] = useState<boolean | null>(null);
   
-  // Fetch like count and user's like status from API
+  // تحميل معلومات الزائر ووضع الإعجاب
   useEffect(() => {
-    const fetchLikes = async () => {
+    const loadData = async () => {
       try {
-        // Get likes from API
-        const response = await fetch('/api/website/likes');
-        if (!response.ok) {
-          throw new Error('Failed to fetch likes');
-        }
+        // التحقق من صحة الاتصال بالخادم
+        const isHealthy = await apiClient.checkHealth();
+        setIsServerConnected(isHealthy);
         
-        const data = await response.json();
-        setLikesCount(data.count);
-        setHasLiked(data.hasLiked);
-      } catch (error) {
-        console.error("Error fetching website likes:", error);
-        // Fallback: Get likes from localStorage if API fails
-        const savedLikesCount = localStorage.getItem("websiteAdditionalLikes");
-        if (savedLikesCount) {
-          setLikesCount(68 + parseInt(savedLikesCount));
+        if (isHealthy) {
+          console.log("Server connection is healthy");
         } else {
-          setLikesCount(68); // Default count
+          console.log("Server connection is not available");
+          toast({
+            variant: "destructive",
+            title: "تعذر الاتصال بالخادم",
+            description: "سيتم استخدام البيانات المحلية",
+          });
         }
-        
-        // Check if user has liked locally
-        setHasLiked(localStorage.getItem("hasVoted") === "true");
+      } catch (error) {
+        console.error("Error checking server health:", error);
+        setIsServerConnected(false);
       }
+      
+      // جلب معلومات الزائر
+      getVisitorInfo();
+      
+      // جلب معلومات الإعجابات
+      fetchLikes();
     };
     
-    fetchLikes();
+    loadData();
   }, []);
+  
+  // الحصول على معلومات الزائر
+  const getVisitorInfo = async () => {
+    try {
+      // محاولة الحصول على البيانات من API
+      if (isServerConnected !== false) {
+        // استخدام الـ API client للحصول على معلومات الزائر
+        const visitorData = await apiClient.get('/visitor/code', { withAuth: false, noThrow: true });
+        
+        if (!visitorData.error) {
+          setVisitorCode(visitorData.code);
+          // حفظ الرمز محليًا كنسخة احتياطية
+          localStorage.setItem("visitor_code", visitorData.code);
+        } else {
+          throw new Error("Failed to get visitor code");
+        }
+      } else {
+        throw new Error("Server connection unavailable");
+      }
+    } catch (error) {
+      console.error("Error fetching visitor info:", error);
+      // الرجوع للتخزين المحلي كبديل
+      const storedCode = localStorage.getItem("visitor_code");
+      if (storedCode) {
+        setVisitorCode(storedCode);
+      } else {
+        // توليد كود عشوائي محليًا إذا لم يكن هناك كود مخزن
+        const randomCode = Math.random().toString(36).substring(2, 10);
+        localStorage.setItem("visitor_code", randomCode);
+        setVisitorCode(randomCode);
+      }
+    }
+  };
+  
+  // Fetch like count and user's like status from API
+  const fetchLikes = async () => {
+    try {
+      // استخدام apiClient لجلب معلومات الإعجابات
+      const data = await apiClient.getWebsiteLikes();
+      
+      // تحديث الحالة بناءً على البيانات المستلمة
+      setLikesCount(data.count);
+      setHasLiked(data.hasLiked);
+      
+      console.log("Likes data:", data);
+      
+      // إذا كانت البيانات من التخزين المحلي، عرض رسالة توضيحية
+      if (data.local) {
+        console.log("Using local likes data");
+      }
+    } catch (error) {
+      console.error("Error fetching website likes:", error);
+      
+      // الرجوع للبيانات المحلية في حالة الخطأ
+      const savedLikesCount = localStorage.getItem("websiteAdditionalLikes");
+      if (savedLikesCount) {
+        setLikesCount(68 + parseInt(savedLikesCount));
+      } else {
+        setLikesCount(68); // العدد الافتراضي
+      }
+      
+      // التحقق من حالة الإعجاب المحلية
+      setHasLiked(localStorage.getItem("hasVoted") === "true");
+    }
+  };
 
   // Toggle like
   const handleLike = async () => {
@@ -51,40 +120,32 @@ const Contact = () => {
     setIsLoading(true);
     
     try {
-      // Call API to toggle like
-      const response = await fetch('/api/website/like', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
+      // استخدام apiClient لإرسال/إلغاء الإعجاب
+      const data = await apiClient.toggleWebsiteLike();
       
-      if (!response.ok) {
-        throw new Error('Failed to toggle like');
-      }
-      
-      const data = await response.json();
-      
-      // Update state with new count and status
+      // تحديث الحالة بناءً على البيانات المستلمة
       setLikesCount(data.count);
       setHasLiked(data.hasLiked);
       
-      // Also update localStorage as fallback
-      localStorage.setItem("hasVoted", data.hasLiked ? "true" : "false");
-      
-      // Show toast message
+      // عرض رسالة توضيحية للمستخدم
       toast({
         title: data.hasLiked ? "شكراً لك!" : "تم إلغاء التقييم",
         description: data.hasLiked 
           ? "تم تسجيل تقييمك الإيجابي بنجاح" 
           : "تم إلغاء تقييمك الإيجابي بنجاح",
+        variant: "default" // استخدام الوضع الافتراضي فقط بدلاً من الاختيار بناءً على مصدر البيانات
       });
+      
+      if (data.local) {
+        console.log("Like toggled locally");
+      }
     } catch (error) {
       console.error("Error toggling like:", error);
+      
       toast({
         variant: "destructive",
-        title: "خطأ",
-        description: "حدث خطأ أثناء محاولة تسجيل تقييمك",
+        title: "تعذر الاتصال بالخادم",
+        description: "تم حفظ تقييمك محليًا",
       });
     } finally {
       setIsLoading(false);
@@ -134,7 +195,12 @@ const Contact = () => {
               <div className="bg-white rounded-lg p-6 shadow-sm">
                 <h3 className="text-lg font-medium mb-4 text-center text-indigo-700">ما رأيك في الموقع؟</h3>
                 
-                <div className="flex justify-center items-center gap-4">
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex items-center gap-2 justify-center mb-2">
+                    <Users className="h-5 w-5 text-purple-500" />
+                    <span className="text-purple-700 font-semibold">{likesCount} مستخدم أعجبهم الموقع</span>
+                  </div>
+                  
                   <div className="text-center">
                     <Button
                       size="lg"
@@ -151,20 +217,27 @@ const Contact = () => {
                         <ThumbsUp className={`h-8 w-8 ${!hasLiked ? 'animate-pulse' : ''}`} />
                       )}
                     </Button>
-                    <p className="mt-2 font-medium text-lg">{likesCount}</p>
-                    <p className="text-sm text-gray-500">إعجاب</p>
+                    
+                    {hasLiked ? (
+                      <div className="mt-3 text-green-600 flex items-center justify-center">
+                        <Check className="mr-1 h-4 w-4" /> تم تسجيل إعجابك
+                      </div>
+                    ) : (
+                      <div className="mt-3 text-gray-500 text-sm">
+                        اضغط لتسجيل إعجابك
+                      </div>
+                    )}
                   </div>
                 </div>
                 
-                {hasLiked ? (
-                  <div className="mt-4 text-center text-green-600 flex items-center justify-center">
-                    <Check className="mr-2 h-4 w-4" /> تم تسجيل رأيك، اضغط مرة أخرى للإلغاء
-                  </div>
-                ) : (
-                  <p className="mt-4 text-center text-sm text-gray-500">
-                    اضغط على الزر لتقييم الموقع
-                  </p>
-                )}
+                <div className="mt-4 text-center text-xs text-gray-500">
+                  {visitorCode && (
+                    <p>رمز المستخدم الخاص بك: {visitorCode}</p>
+                  )}
+                  {isServerConnected === false && (
+                    <p className="text-amber-500 mt-1">الخادم غير متاح حالياً، يتم استخدام البيانات المحلية</p>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
