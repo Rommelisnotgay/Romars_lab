@@ -1,231 +1,384 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Bell } from 'lucide-react';
-import { toast } from './ui/use-toast';
-import { apiClient } from '@/lib/apiClient';
+import { useState, useEffect, useRef } from 'react';
+import { X, Info, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Badge } from '@/components/ui/badge';
 
 interface Notification {
   _id: string;
-  message: string;
-  link?: string;
-  timestamp: string;
-  seen: boolean;
+  id?: string;
+  title: string;
+  content: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  active: boolean;
+  expiresAt: string;
+  createdAt: string;
+  displayDuration?: number; // Duration in seconds to display the notification
 }
 
 const ReminderSystem = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [isOpen, setIsOpen] = useState(false);
-  const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
-  const [isConnected, setIsConnected] = useState(true);
+  const [currentNotificationIndex, setCurrentNotificationIndex] = useState(0);
+  const [showNotification, setShowNotification] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [lastCheckTimestamp, setLastCheckTimestamp] = useState<number>(Date.now());
 
-  // استدعاء الإشعارات من الخادم
-  const fetchNotifications = useCallback(async () => {
+  // تتبع الإشعارات التي تم عرضها بالفعل
+  const shownNotificationsRef = useRef<Set<string>>(new Set());
+  
+  // Default display duration (in seconds)
+  const DEFAULT_DISPLAY_DURATION = 3;
+  
+  // API base URL for notifications
+  const apiBaseUrl = window.location.hostname === 'localhost' 
+    ? 'http://localhost:5000/api' 
+    : '/api';
+
+  // Function to load and filter notifications from localStorage
+  const loadNotificationsFromStorage = () => {
     try {
-      // التحقق من صحة الاتصال بالخادم أولاً
-      const isHealthy = await apiClient.checkHealth();
-      
-      if (!isHealthy) {
-        setIsConnected(false);
-        return false;
+      const storedNotifications = localStorage.getItem('notifications');
+      if (storedNotifications) {
+        const parsedNotifications = JSON.parse(storedNotifications);
+        console.log("Loaded notifications from localStorage:", parsedNotifications);
+        
+        // Filter out expired notifications
+        const now = new Date();
+        const activeNotifications = parsedNotifications.filter((n: Notification) => {
+          // Make sure expiresAt is properly defined
+          if (!n.expiresAt) return false;
+          
+          // Parse date and check if it's still valid
+          try {
+            const expiryDate = new Date(n.expiresAt);
+            return expiryDate > now && n.active !== false;
+          } catch (e) {
+            console.error("Invalid date format in notification:", n);
+            return false;
+          }
+        });
+        
+        // التحقق من الإشعارات الجديدة فقط (التي لم يتم عرضها من قبل)
+        const newNotifications = activeNotifications.filter(n => 
+          !shownNotificationsRef.current.has(n._id || n.id || '')
+        );
+        
+        if (newNotifications.length > 0) {
+          console.log("New active notifications found:", newNotifications.length);
+          setNotifications(newNotifications);
+          setShowNotification(true);
+          return true;
+        } else if (activeNotifications.length === 0) {
+          // إذا لم تكن هناك إشعارات نشطة، فقم بإخفاء الإشعارات
+          setShowNotification(false);
+          return false;
+        }
       }
+    } catch (error) {
+      console.error('Error loading notifications from localStorage:', error);
+    }
+    return false;
+  };
+
+  // Function to fetch and filter notifications
+  const fetchAndUpdateNotifications = async () => {
+    try {
+      setIsLoading(true);
       
-      setIsConnected(true);
+      // استخراج الوقت الحالي للمقارنة
+      const currentTime = Date.now();
       
-      // إرسال وقت آخر استعلام للحصول على الإشعارات الجديدة فقط
-      const params = lastFetchTime 
-        ? `?since=${lastFetchTime.toISOString()}`
-        : '';
+      // جلب الإشعارات من الخادم
+      const response = await fetch(`${apiBaseUrl}/notifications?timestamp=${lastCheckTimestamp}`);
       
-      const response = await fetch(`/api/notifications${params}`);
       if (!response.ok) {
-        throw new Error(`Failed to fetch notifications: ${response.status}`);
+        throw new Error('Failed to fetch notifications');
       }
       
       const data = await response.json();
+      console.log("API notifications loaded:", data);
       
-      // تحديث وقت آخر استعلام
-      setLastFetchTime(new Date());
+      // تحديث وقت آخر تحقق
+      setLastCheckTimestamp(currentTime);
       
-      if (data.length > 0) {
-        // دمج الإشعارات الجديدة مع القائمة الحالية
-        setNotifications(prevNotifications => {
-          // إنشاء مجموعة من معرفات الإشعارات الحالية
-          const existingIds = new Set(prevNotifications.map(n => n._id));
-          
-          // إضافة الإشعارات الجديدة فقط
-          const newNotifications = data.filter(n => !existingIds.has(n._id));
-          
-          if (newNotifications.length > 0) {
-            // إظهار إشعار للمستخدم إذا كانت هناك إشعارات جديدة
-            toast({
-              title: 'إشعارات جديدة',
-              description: `لديك ${newNotifications.length} إشعار جديد`,
-              duration: 3000,
-            });
-          }
-          
-          // دمج الإشعارات القديمة والجديدة وترتيبها حسب الوقت
-          return [...prevNotifications, ...newNotifications]
-            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        });
+      if (Array.isArray(data) && data.length > 0) {
+        // التحقق من الإشعارات الجديدة فقط (التي لم يتم عرضها من قبل)
+        const newNotifications = data.filter(n => 
+          !shownNotificationsRef.current.has(n._id || n.id || '')
+        );
+        
+        if (newNotifications.length > 0) {
+          console.log("New server notifications found:", newNotifications.length);
+          setNotifications(newNotifications);
+          setCurrentNotificationIndex(0);
+          setShowNotification(true);
+        }
+      } else {
+        // If API returns empty array, try localStorage
+        if (!loadNotificationsFromStorage()) {
+          setShowNotification(false);
+        }
       }
-      
-      return data.length > 0;
     } catch (error) {
-      console.error('Error fetching notifications:', error);
-      setIsConnected(false);
-      return false;
+      console.error('API Error fetching notifications:', error);
+      
+      // Fallback to localStorage
+      if (!loadNotificationsFromStorage()) {
+        setShowNotification(false);
+      }
+    } finally {
+      setIsLoading(false);
     }
-  }, [lastFetchTime]);
+  };
 
-  // Long polling لمزامنة الإشعارات
-  const startLongPolling = useCallback(async () => {
-    try {
-      const hasNewNotifications = await fetchNotifications();
-      
-      // تحديث عدد الإشعارات غير المقروءة
-      setUnreadCount(notifications.filter(n => !n.seen).length);
-      
-      // استدعاء مرة أخرى بعد فترة زمنية (10 ثواني)
-      setTimeout(startLongPolling, 10000);
-      
-      return hasNewNotifications;
-    } catch (error) {
-      console.error('Long polling error:', error);
-      
-      // إعادة المحاولة بعد فترة أطول في حالة الخطأ
-      setTimeout(startLongPolling, 30000);
-      return false;
-    }
-  }, [fetchNotifications, notifications]);
-
-  // بدء Long Polling عند تحميل المكون
+  // تنفيذ نظام التحقق المتكرر من الإشعارات الجديدة
   useEffect(() => {
+    console.log("ReminderSystem: Initial load");
+    
+    // تهيئة قائمة الإشعارات التي تم عرضها
+    shownNotificationsRef.current = new Set();
+    
+    // جلب الإشعارات عند بدء التشغيل
+    fetchAndUpdateNotifications();
+    
+    // التحقق بشكل مباشر من localStorage عند التحميل
+    loadNotificationsFromStorage();
+
+    // تنفيذ التحقق المتكرر (كل 10 ثوان)
+    const shortIntervalId = setInterval(fetchAndUpdateNotifications, 10 * 1000);
+    
+    // تنفيذ التحقق العميق كل 5 دقائق
+    const longIntervalId = setInterval(() => {
+      console.log("Running deep check for notifications");
+      // إعادة تعيين قائمة الإشعارات التي تم عرضها بعد فترة طويلة
+      shownNotificationsRef.current = new Set();
+      fetchAndUpdateNotifications();
+    }, 5 * 60 * 1000);
+
+    // الاستماع لتغييرات التخزين المحلي (عند إضافة إشعار جديد في علامة تبويب مختلفة)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'notifications') {
+        console.log("Storage changed event detected!");
+        loadNotificationsFromStorage();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    
+    // تنظيف عند إلغاء التركيب
+    return () => {
+      clearInterval(shortIntervalId);
+      clearInterval(longIntervalId);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
+  // الاستماع للحدث المخصص للتغييرات في نفس النافذة
+  useEffect(() => {
+    const handleLocalChange = () => {
+      console.log("localStorageChanged event detected!");
+      loadNotificationsFromStorage();
+    };
+    
+    window.addEventListener('localStorageChanged', handleLocalChange as EventListener);
+    return () => {
+      window.removeEventListener('localStorageChanged', handleLocalChange as EventListener);
+    };
+  }, []);
+
+  // تنفيذ نظام "Long Polling" للتحقق من الإشعارات الجديدة
+  useEffect(() => {
+    // تنفيذ وظيفة long polling
+    const startLongPolling = async () => {
+      try {
+        // جلب الإشعارات بواسطة long polling
+        const response = await fetch(`${apiBaseUrl}/notifications/poll?timestamp=${Date.now()}`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          
+          // تحديث الإشعارات إذا كانت هناك إشعارات جديدة
+          if (data.hasNewNotifications) {
+            console.log("Long polling detected new notifications");
+            fetchAndUpdateNotifications();
+          }
+        }
+      } catch (error) {
+        console.error("Long polling error:", error);
+      } finally {
+        // إعادة بدء long polling بعد فترة قصيرة
+        setTimeout(startLongPolling, 3000);
+      }
+    };
+    
+    // بدء عملية long polling
     startLongPolling();
     
-    // تنظيف عند إزالة المكون
-    return () => {
-      // إيقاف Long Polling (لا يمكن إلغاء setTimeout بشكل مباشر هنا لأن الدالة غير متزامنة)
-    };
-  }, [startLongPolling]);
+    // تنظيف عند إلغاء التركيب (لن يتم تنفيذها عمليًا بسبب setTimeout)
+    return () => {};
+  }, []);
 
-  // تعليم الإشعار كمقروء
-  const markAsSeen = async (id: string) => {
-    try {
-      if (!isConnected) {
-        // تحديث الحالة محليًا فقط إذا كان الاتصال بالخادم غير متاح
-        setNotifications(prevNotifications => 
-          prevNotifications.map(n => n._id === id ? { ...n, seen: true } : n)
-        );
-        setUnreadCount(prev => Math.max(0, prev - 1));
-        return;
+  // إخفاء الإشعار تلقائيًا بعد المدة المحددة وتسجيله كإشعار تم عرضه
+  useEffect(() => {
+    if (showNotification && notifications.length > 0) {
+      const currentNotification = notifications[currentNotificationIndex];
+      if (!currentNotification) return;
+
+      // تسجيل الإشعار كإشعار تم عرضه بالفعل
+      const notificationId = currentNotification._id || currentNotification.id;
+      if (notificationId) {
+        shownNotificationsRef.current.add(notificationId);
       }
       
-      const response = await fetch(`/api/notifications/${id}/seen`, {
-        method: 'PUT'
-      });
+      // Make sure we have a valid duration (in seconds)
+      const duration = currentNotification && currentNotification.displayDuration ? 
+        currentNotification.displayDuration * 1000 : DEFAULT_DISPLAY_DURATION * 1000;
       
-      if (!response.ok) {
-        throw new Error('Failed to mark notification as seen');
-      }
-      
-      // تحديث الحالة المحلية
-      setNotifications(prevNotifications => 
-        prevNotifications.map(n => n._id === id ? { ...n, seen: true } : n)
-      );
-      
-      // تحديث عدد الإشعارات غير المقروءة
-      setUnreadCount(prev => Math.max(0, prev - 1));
-    } catch (error) {
-      console.error('Error marking notification as seen:', error);
-      
-      // تحديث الحالة المحلية حتى في حالة الخطأ
-      setNotifications(prevNotifications => 
-        prevNotifications.map(n => n._id === id ? { ...n, seen: true } : n)
-      );
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      const timeoutId = setTimeout(() => {
+        setShowNotification(false);
+      }, duration);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [currentNotificationIndex, notifications, showNotification, DEFAULT_DISPLAY_DURATION]);
+
+  // Get the current notification
+  const currentNotification = notifications[currentNotificationIndex];
+
+  // Get notification icon based on type
+  const getNotificationIcon = (type: string) => {
+    switch (type) {
+      case 'info':
+        return <Info className="h-5 w-5 text-blue-500" />;
+      case 'success':
+        return <CheckCircle className="h-5 w-5 text-green-500" />;
+      case 'warning':
+        return <AlertTriangle className="h-5 w-5 text-yellow-500" />;
+      case 'error':
+        return <XCircle className="h-5 w-5 text-red-500" />;
+      default:
+        return <Info className="h-5 w-5 text-blue-500" />;
     }
   };
 
-  // فتح الرابط وتعليم الإشعار كمقروء
-  const handleNotificationClick = (notification: Notification) => {
-    // تعليم الإشعار كمقروء
-    if (!notification.seen) {
-      markAsSeen(notification._id);
+  // Get notification badge based on type
+  const getNotificationBadge = (type: string) => {
+    switch (type) {
+      case 'info':
+        return <Badge className="bg-blue-500">معلومات</Badge>;
+      case 'success':
+        return <Badge className="bg-green-500">نجاح</Badge>;
+      case 'warning':
+        return <Badge className="bg-yellow-500">تحذير</Badge>;
+      case 'error':
+        return <Badge className="bg-red-500">تنبيه</Badge>;
+      default:
+        return <Badge className="bg-blue-500">معلومات</Badge>;
     }
-    
-    // فتح الرابط إذا كان موجودًا
-    if (notification.link) {
-      window.open(notification.link, '_blank');
-    }
-    
-    // إغلاق قائمة الإشعارات
-    setIsOpen(false);
   };
+
+  // Get notification background color based on type
+  const getNotificationBackground = (type: string) => {
+    switch (type) {
+      case 'info':
+        return 'bg-blue-50 border-blue-200';
+      case 'success':
+        return 'bg-green-50 border-green-200';
+      case 'warning':
+        return 'bg-yellow-50 border-yellow-200';
+      case 'error':
+        return 'bg-red-50 border-red-200';
+      default:
+        return 'bg-blue-50 border-blue-200';
+    }
+  };
+
+  // Close notification
+  const handleClose = () => {
+    setShowNotification(false);
+  };
+
+  // Go to next notification
+  const handleNext = () => {
+    setShowNotification(false);
+    setTimeout(() => {
+    setCurrentNotificationIndex((prevIndex) => 
+      prevIndex === notifications.length - 1 ? 0 : prevIndex + 1
+    );
+      setShowNotification(true);
+    }, 300);
+  };
+
+  // Go to previous notification
+  const handlePrev = () => {
+    setShowNotification(false);
+    setTimeout(() => {
+    setCurrentNotificationIndex((prevIndex) => 
+      prevIndex === 0 ? notifications.length - 1 : prevIndex - 1
+    );
+      setShowNotification(true);
+    }, 300);
+  };
+
+  // Don't render anything if there are no notifications to show
+  if (isLoading || !showNotification || !currentNotification || notifications.length === 0) {
+    return null;
+  }
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-        aria-label="الإشعارات"
-      >
-        <Bell className="h-6 w-6" />
-        {unreadCount > 0 && (
-          <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">
-            {unreadCount}
-          </span>
-        )}
-      </button>
-      
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-900 rounded-md shadow-lg overflow-hidden z-50">
-          <div className="p-3 border-b border-gray-200 dark:border-gray-700">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">الإشعارات</h3>
-          </div>
-          
-          <div className="max-h-96 overflow-y-auto">
-            {notifications.length === 0 ? (
-              <div className="p-4 text-center text-gray-500 dark:text-gray-400">
-                لا توجد إشعارات
+    <AnimatePresence>
+      {showNotification && (
+        <motion.div
+          initial={{ opacity: 0, y: -50 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -50 }}
+          transition={{ duration: 0.3 }}
+          className={`fixed top-4 left-4 right-4 md:left-auto md:right-4 md:w-96 z-50 p-4 rounded-lg shadow-lg border ${getNotificationBackground(currentNotification.type)}`}
+          dir="rtl"
+        >
+          <div className="flex justify-between items-start">
+            <div className="flex items-center gap-2">
+              {getNotificationIcon(currentNotification.type)}
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-gray-900">{currentNotification.title}</h3>
+                  {getNotificationBadge(currentNotification.type)}
+                </div>
               </div>
-            ) : (
-              <ul>
-                {notifications.map(notification => (
-                  <li 
-                    key={notification._id}
-                    className={`p-3 border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors ${
-                      !notification.seen ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                    }`}
-                    onClick={() => handleNotificationClick(notification)}
-                  >
-                    <div className="flex items-start">
-                      <div className="ml-3 flex-1">
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                          {notification.message}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          {new Date(notification.timestamp).toLocaleString('ar-EG')}
-                        </p>
-                      </div>
-                      {!notification.seen && (
-                        <span className="h-2 w-2 bg-blue-600 rounded-full"></span>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            
-            {!isConnected && (
-              <div className="p-2 text-center text-xs text-amber-500 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400">
-                تعذر الاتصال بالخادم. قد لا تكون الإشعارات محدثة.
-              </div>
-            )}
-          </div>
         </div>
-      )}
+        <button
+              onClick={handleClose}
+              className="text-gray-500 hover:text-gray-700 focus:outline-none"
+              aria-label="إغلاق"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="mt-2 text-gray-700">{currentNotification.content}</div>
+          
+          {notifications.length > 1 && (
+            <div className="mt-3 flex justify-between items-center text-xs text-gray-500">
+              <div>
+                {currentNotificationIndex + 1} من {notifications.length}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handlePrev}
+                  className="px-2 py-1 bg-white rounded border hover:bg-gray-50"
+        >
+                  السابق
+                </button>
+                <button
+                  onClick={handleNext}
+                  className="px-2 py-1 bg-white rounded border hover:bg-gray-50"
+                >
+                  التالي
+        </button>
+      </div>
     </div>
+          )}
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };
 

@@ -2,7 +2,7 @@
 
 // Base URL for API requests - use relative URL in production
 const API_BASE_URL = window.location.hostname === 'localhost' 
-  ? 'http://localhost:8080/api'
+  ? 'http://localhost:5000/api' 
   : '/api';
 
 // Helper to get auth token from local storage
@@ -34,26 +34,6 @@ interface ApiError extends Error {
   status?: number;
   data?: any;
 }
-
-/**
- * Health check to verify server connectivity
- */
-export const checkServerHealth = async (): Promise<boolean> => {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-    
-    const response = await fetch(`${API_BASE_URL}/health`, { 
-      signal: controller.signal 
-    });
-    
-    clearTimeout(timeoutId);
-    return response.ok;
-  } catch (error) {
-    console.error('Server health check failed:', error);
-    return false;
-  }
-};
 
 /**
  * Fetch with authentication header and JSON handling
@@ -106,13 +86,6 @@ export const fetchWithAuth = async (endpoint: string, options: RequestInit = {})
 // Main API client methods
 export const apiClient = {
   /**
-   * Check server connectivity
-   */
-  async checkHealth(): Promise<boolean> {
-    return checkServerHealth();
-  },
-
-  /**
    * Make a GET request to the API
    */
   async get(endpoint: string, options: ApiOptions = { withAuth: true }): Promise<any> {
@@ -136,69 +109,6 @@ export const apiClient = {
       console.error('Error liking post:', error);
       // Return a default response to prevent site crash
       return { success: false, error: 'Failed to like post' };
-    }
-  },
-
-  /**
-   * Website like - special handling for website likes with fallback
-   */
-  async toggleWebsiteLike(): Promise<any> {
-    try {
-      // First check server health
-      const isHealthy = await checkServerHealth();
-      if (!isHealthy) {
-        throw new Error('Server is not available');
-      }
-      
-      const response = await this.post('/website/like', {}, { noThrow: true, withAuth: false });
-      
-      // Handle local fallback if API fails
-      if (!response || response.error) {
-        throw new Error(response?.error || 'Failed to toggle like');
-      }
-      
-      return response;
-    } catch (error) {
-      console.error('Error toggling website like:', error);
-      
-      // Handle locally if server is unavailable
-      const currentlyLiked = localStorage.getItem("hasVoted") === "true";
-      const newLikedState = !currentlyLiked;
-      
-      // Update local storage
-      localStorage.setItem("hasVoted", newLikedState ? "true" : "false");
-      
-      // Update local counter
-      let storedLikes = parseInt(localStorage.getItem("websiteAdditionalLikes") || "0");
-      storedLikes = newLikedState ? storedLikes + 1 : Math.max(0, storedLikes - 1);
-      localStorage.setItem("websiteAdditionalLikes", storedLikes.toString());
-      
-      return { 
-        hasLiked: newLikedState, 
-        count: 68 + storedLikes, 
-        local: true 
-      };
-    }
-  },
-  
-  /**
-   * Get website likes
-   */
-  async getWebsiteLikes(): Promise<any> {
-    try {
-      return await this.get('/website/likes', { withAuth: false, noThrow: true });
-    } catch (error) {
-      console.error('Error getting website likes:', error);
-      
-      // Handle local fallback
-      const hasLiked = localStorage.getItem("hasVoted") === "true";
-      const additionalLikes = parseInt(localStorage.getItem("websiteAdditionalLikes") || "0");
-      
-      return { 
-        count: 68 + additionalLikes, 
-        hasLiked, 
-        local: true 
-      };
     }
   },
 
