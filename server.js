@@ -889,23 +889,24 @@ app.get('/api/admin/protected', authenticateToken, (req, res) => {
   res.json({ message: 'This is a protected route', user: req.user });
 });
 
-// Notifications Routes
+// Notification Routes
 app.get('/api/notifications', async (req, res) => {
   try {
     let notifications;
-    const now = new Date();
-    
     if (mongoose.connection.readyState === 1) {
+      // Filter only active notifications that haven't expired
+      const now = new Date();
       notifications = await Notification.find({
         active: true,
         expiresAt: { $gt: now }
       }).sort({ createdAt: -1 });
     } else {
-      notifications = inMemoryNotifications.filter(notification => 
-        notification.active && new Date(notification.expiresAt) > now
-      ).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      // Use in-memory notifications with filtering
+      const now = new Date();
+      notifications = inMemoryNotifications
+        .filter(n => n.active && new Date(n.expiresAt) > now)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
-    
     res.json(notifications);
   } catch (error) {
     console.error('Error fetching notifications:', error);
@@ -913,96 +914,135 @@ app.get('/api/notifications', async (req, res) => {
   }
 });
 
-app.post('/api/admin/notifications', authenticateToken, isAdmin, async (req, res) => {
+// Create notification
+app.post('/api/notifications', authenticateToken, isAdmin, async (req, res) => {
   try {
-    const { title, content, type, expiresIn } = req.body;
+    const { title, content, type, displayDuration } = req.body;
     
-    if (!title || !content || !expiresIn) {
-      return res.status(400).json({ message: 'Title, content and expiration time are required' });
+    if (!title || !content || !type) {
+      return res.status(400).json({ message: 'Missing required fields' });
     }
     
-    // Calculate expiration date
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + parseInt(expiresIn));
+    // Set default expiry to 24 hours if not specified
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     
-    let notification;
+    let newNotification;
+    
     if (mongoose.connection.readyState === 1) {
-      notification = new Notification({
+      newNotification = new Notification({
         title,
         content,
-        type: type || 'info',
-        expiresAt
-      });
-      await notification.save();
-    } else {
-      notification = {
-        id: Date.now().toString(),
-        title,
-        content,
-        type: type || 'info',
+        type,
         active: true,
+        displayDuration: displayDuration || 3, // Default 3 seconds
         expiresAt,
-        createdAt: new Date()
+        createdAt: now
+      });
+      
+      await newNotification.save();
+    } else {
+      // Create in-memory notification
+      newNotification = {
+        _id: generateId(),
+        title,
+        content,
+        type,
+        active: true,
+        displayDuration: displayDuration || 3,
+        expiresAt: expiresAt.toISOString(),
+        createdAt: now.toISOString()
       };
-      inMemoryNotifications.push(notification);
+      
+      inMemoryNotifications.push(newNotification);
     }
     
-    res.status(201).json(notification);
+    res.status(201).json(newNotification);
   } catch (error) {
     console.error('Error creating notification:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-app.put('/api/admin/notifications/:id', authenticateToken, isAdmin, async (req, res) => {
+// Update notification
+app.put('/api/notifications/:id', authenticateToken, isAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, content, type, active, expiresIn } = req.body;
+    const { title, content, type, active, displayDuration } = req.body;
     
-    const updateData = {};
-    if (title) updateData.title = title;
-    if (content) updateData.content = content;
-    if (type) updateData.type = type;
-    if (active !== undefined) updateData.active = active;
-    
-    if (expiresIn) {
-      const expiresAt = new Date();
-      expiresAt.setHours(expiresAt.getHours() + parseInt(expiresIn));
-      updateData.expiresAt = expiresAt;
+    if (!title || !content || !type) {
+      return res.status(400).json({ message: 'Missing required fields' });
     }
     
-    let notification;
+    let updatedNotification;
+    
     if (mongoose.connection.readyState === 1) {
-      notification = await Notification.findByIdAndUpdate(id, updateData, { new: true });
-      if (!notification) return res.status(404).json({ message: 'Notification not found' });
-    } else {
-      const notificationIndex = inMemoryNotifications.findIndex(n => n.id === id);
-      if (notificationIndex === -1) return res.status(404).json({ message: 'Notification not found' });
+      updatedNotification = await Notification.findByIdAndUpdate(
+        id,
+        { 
+          title, 
+          content, 
+          type,
+          active: active !== undefined ? active : true,
+          displayDuration: displayDuration || 3,
+          updatedAt: new Date()
+        },
+        { new: true }
+      );
       
-      inMemoryNotifications[notificationIndex] = {
+      if (!updatedNotification) {
+        return res.status(404).json({ message: 'Notification not found' });
+      }
+    } else {
+      // Update in-memory notification
+      const notificationIndex = inMemoryNotifications.findIndex(n => 
+        (n._id === id || n.id === id)
+      );
+      
+      if (notificationIndex === -1) {
+        return res.status(404).json({ message: 'Notification not found' });
+      }
+      
+      updatedNotification = {
         ...inMemoryNotifications[notificationIndex],
-        ...updateData
+        title,
+        content,
+        type,
+        active: active !== undefined ? active : true,
+        displayDuration: displayDuration || 3,
+        updatedAt: new Date().toISOString()
       };
-      notification = inMemoryNotifications[notificationIndex];
+      
+      inMemoryNotifications[notificationIndex] = updatedNotification;
     }
     
-    res.json(notification);
+    res.json(updatedNotification);
   } catch (error) {
     console.error('Error updating notification:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-app.delete('/api/admin/notifications/:id', authenticateToken, isAdmin, async (req, res) => {
+// Delete notification
+app.delete('/api/notifications/:id', authenticateToken, isAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     
     if (mongoose.connection.readyState === 1) {
-      const notification = await Notification.findByIdAndDelete(id);
-      if (!notification) return res.status(404).json({ message: 'Notification not found' });
+      const deletedNotification = await Notification.findByIdAndDelete(id);
+      
+      if (!deletedNotification) {
+        return res.status(404).json({ message: 'Notification not found' });
+      }
     } else {
-      const notificationIndex = inMemoryNotifications.findIndex(n => n.id === id);
-      if (notificationIndex === -1) return res.status(404).json({ message: 'Notification not found' });
+      // Delete from in-memory notifications
+      const notificationIndex = inMemoryNotifications.findIndex(n => 
+        (n._id === id || n.id === id)
+      );
+      
+      if (notificationIndex === -1) {
+        return res.status(404).json({ message: 'Notification not found' });
+      }
       
       inMemoryNotifications.splice(notificationIndex, 1);
     }
@@ -1013,6 +1053,11 @@ app.delete('/api/admin/notifications/:id', authenticateToken, isAdmin, async (re
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// Helper function to generate a unique ID for in-memory data
+const generateId = () => {
+  return Date.now().toString() + Math.random().toString(36).substring(2, 9);
+};
 
 // Active Users Tracking
 app.get('/api/active-users', async (req, res) => {

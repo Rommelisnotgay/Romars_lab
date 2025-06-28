@@ -78,8 +78,12 @@ const ReminderSystem = () => {
       try {
         setIsLoading(true);
       
-      // Try API first
-      fetch('http://localhost:5000/api/notifications')
+      // Try API first - use relative URL or base URL from apiClient
+      const apiBaseUrl = window.location.hostname === 'localhost' 
+        ? 'http://localhost:5000/api' 
+        : '/api';
+        
+      fetch(`${apiBaseUrl}/notifications`)
         .then(response => {
           if (!response.ok) {
             throw new Error('Failed to fetch notifications');

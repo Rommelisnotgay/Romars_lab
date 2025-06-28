@@ -26,10 +26,6 @@ const Contact = () => {
     // تحميل عدد الإعجابات الإضافية
     const fetchLikes = async () => {
       try {
-        // في حالة التنفيذ الحقيقي، يمكن استخدام API
-        // const response = await apiClient.get('/website/likes');
-        // setAdditionalLikes(response.additionalLikes);
-        
         // استخدام localStorage كبديل مؤقت
         const savedAdditionalLikes = localStorage.getItem("websiteAdditionalLikes");
         if (savedAdditionalLikes) {
@@ -44,7 +40,22 @@ const Contact = () => {
   }, []);
 
   const handleLike = () => {
-    if (!hasVoted) {
+    // إذا كان المستخدم قد صوت بالفعل، نقوم بإزالة تصويته
+    if (hasVoted) {
+      // تقليل عدد الإعجابات الإضافية
+      const newAdditionalLikes = additionalLikes - 1;
+      setAdditionalLikes(newAdditionalLikes);
+      
+      // حفظ القيم في localStorage
+      localStorage.setItem("websiteAdditionalLikes", newAdditionalLikes.toString());
+      localStorage.setItem("hasVoted", "false");
+      setHasVoted(false);
+      
+      toast({
+        title: "تم إلغاء التقييم",
+        description: "تم إلغاء تقييمك الإيجابي بنجاح",
+      });
+    } else {
       // زيادة عدد الإعجابات الإضافية
       const newAdditionalLikes = additionalLikes + 1;
       setAdditionalLikes(newAdditionalLikes);
@@ -53,9 +64,6 @@ const Contact = () => {
       localStorage.setItem("websiteAdditionalLikes", newAdditionalLikes.toString());
       localStorage.setItem("hasVoted", "true");
       setHasVoted(true);
-      
-      // إرسال الإعجاب إلى الخادم (في التنفيذ الحقيقي)
-      // apiClient.post('/website/like', {});
       
       toast({
         title: "شكراً لك!",
@@ -112,11 +120,12 @@ const Contact = () => {
                     <Button
                       size="lg"
                       variant={hasVoted ? "outline" : "default"}
-                      className={`rounded-full h-16 w-16 ${hasVoted ? 'bg-gray-100 text-gray-400' : 'bg-purple-600 hover:bg-purple-700'}`}
+                      className={`rounded-full h-16 w-16 ${hasVoted 
+                        ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 hover:text-purple-800' 
+                        : 'bg-purple-600 hover:bg-purple-700'}`}
                       onClick={handleLike}
-                      disabled={hasVoted}
                     >
-                      <ThumbsUp className={`h-8 w-8 ${hasVoted ? '' : 'animate-pulse'}`} />
+                      <ThumbsUp className={`h-8 w-8 ${!hasVoted ? 'animate-pulse' : ''}`} />
                     </Button>
                     <p className="mt-2 font-medium text-lg">{totalLikes}</p>
                     <p className="text-sm text-gray-500">إعجاب</p>
@@ -125,7 +134,7 @@ const Contact = () => {
                 
                 {hasVoted ? (
                   <div className="mt-4 text-center text-green-600 flex items-center justify-center">
-                    <Check className="mr-2 h-4 w-4" /> تم تسجيل رأيك، شكراً لك!
+                    <Check className="mr-2 h-4 w-4" /> تم تسجيل رأيك، اضغط مرة أخرى للإلغاء
                   </div>
                 ) : (
                   <p className="mt-4 text-center text-sm text-gray-500">
