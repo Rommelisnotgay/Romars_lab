@@ -2,7 +2,7 @@
 
 // Base URL for API requests - use relative URL in production
 const API_BASE_URL = window.location.hostname === 'localhost' 
-  ? 'http://localhost:5000/api' 
+  ? 'http://localhost:8080/api'
   : '/api';
 
 // Helper to get auth token from local storage

@@ -17,35 +17,21 @@ const __dirname = dirname(__filename);
 dotenv.config();
 
 // Set default values if environment variables are not provided
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 8080;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/rommel_admin';
 const JWT_SECRET = process.env.JWT_SECRET || 'rommel_super_secret_key';
 
 // Initialize Express app
 const app = express();
 
-// تكوين CORS للسماح بالوصول من منافذ التطوير والإنتاج
-const corsOptions = {
-  origin: function (origin, callback) {
-    // السماح لأي أصل في بيئة التطوير، أو للطلبات من نفس الأصل في الإنتاج
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:8080',
-      undefined // للسماح بطلبات من نفس الأصل أو طلبات مباشرة
-    ];
-    if (allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+// تكوين CORS للسماح بالوصول من أي مصدر في بيئة الإنتاج
+app.use(cors({
+  origin: '*', // السماح لأي أصل
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-};
+}));
 
-app.use(cors(corsOptions));
 app.use(express.json());
 
 // Serve static files from the dist directory in production
@@ -53,14 +39,15 @@ if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'dist')));
 }
 
-// Connect to MongoDB
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => {
-    console.error('MongoDB connection error:', err);
-    // If we can't connect to MongoDB, we will use an in-memory admin account
-    console.log('Using in-memory authentication instead');
-  });
+// Connect to MongoDB with improved error handling
+mongoose.connect(MONGODB_URI, {
+  serverSelectionTimeoutMS: 5000 // زيادة مهلة الاتصال
+})
+.then(() => console.log('Connected to MongoDB'))
+.catch(err => {
+  console.error('MongoDB connection error:', err);
+  console.log('Using in-memory authentication instead');
+});
 
 // ========== DATABASE MODELS ==========
 
@@ -1286,19 +1273,20 @@ app.post('/api/website/like', async (req, res) => {
   }
 });
 
-// Serve static assets in production
-if (process.env.NODE_ENV === 'production') {
-  // Serve static files from the dist directory
-  app.use(express.static(path.join(__dirname, 'dist')));
+// Fallback route to serve the frontend in production
+app.get('*', (req, res) => {
+  // تحويل طلبات API للمسار الصحيح
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ message: 'API endpoint not found' });
+  }
   
-  // Handle client-side routing - always return index.html for non-API routes
-  app.get('*', (req, res) => {
-    // Skip API routes
-    if (!req.path.startsWith('/api')) {
-    res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
-    }
-  });
-}
+  // تقديم ملف HTML الرئيسي لجميع الطلبات الأخرى
+  if (process.env.NODE_ENV === 'production') {
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  } else {
+    res.status(404).send('Not found in development mode');
+  }
+});
 
 // Health check endpoint for Railway
 app.get('/health', (req, res) => {
@@ -1312,9 +1300,14 @@ app.get('/health', (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV}`);
-  // Try to create default admin if connected to MongoDB
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // محاولة إنشاء حساب المسؤول الافتراضي
   if (mongoose.connection.readyState === 1) {
+    initializeInMemoryAdmin();
+  } else {
+    console.log('Using in-memory data storage due to database connection issues');
+    // تهيئة البيانات الافتراضية في الذاكرة
     initializeInMemoryAdmin();
   }
 }); 
