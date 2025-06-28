@@ -20,12 +20,18 @@ const ReminderSystem = () => {
   const [currentNotificationIndex, setCurrentNotificationIndex] = useState(0);
   const [showNotification, setShowNotification] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [lastCheckTimestamp, setLastCheckTimestamp] = useState<number>(Date.now());
 
   // تتبع الإشعارات التي تم عرضها بالفعل
   const shownNotificationsRef = useRef<Set<string>>(new Set());
   
   // Default display duration (in seconds)
   const DEFAULT_DISPLAY_DURATION = 3;
+  
+  // API base URL for notifications
+  const apiBaseUrl = window.location.hostname === 'localhost' 
+    ? 'http://localhost:5000/api' 
+    : '/api';
 
   // Function to load and filter notifications from localStorage
   const loadNotificationsFromStorage = () => {
@@ -74,77 +80,81 @@ const ReminderSystem = () => {
   };
 
   // Function to fetch and filter notifications
-  const fetchAndUpdateNotifications = () => {
-      try {
-        setIsLoading(true);
+  const fetchAndUpdateNotifications = async () => {
+    try {
+      setIsLoading(true);
       
-      // Try API first - use relative URL or base URL from apiClient
-      const apiBaseUrl = window.location.hostname === 'localhost' 
-        ? 'http://localhost:5000/api' 
-        : '/api';
+      // استخراج الوقت الحالي للمقارنة
+      const currentTime = Date.now();
+      
+      // جلب الإشعارات من الخادم
+      const response = await fetch(`${apiBaseUrl}/notifications?timestamp=${lastCheckTimestamp}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch notifications');
+      }
+      
+      const data = await response.json();
+      console.log("API notifications loaded:", data);
+      
+      // تحديث وقت آخر تحقق
+      setLastCheckTimestamp(currentTime);
+      
+      if (Array.isArray(data) && data.length > 0) {
+        // التحقق من الإشعارات الجديدة فقط (التي لم يتم عرضها من قبل)
+        const newNotifications = data.filter(n => 
+          !shownNotificationsRef.current.has(n._id || n.id || '')
+        );
         
-      fetch(`${apiBaseUrl}/notifications`)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Failed to fetch notifications');
-          }
-          return response.json();
-        })
-        .then(data => {
-          console.log("API notifications loaded:", data);
-          if (Array.isArray(data) && data.length > 0) {
-            // التحقق من الإشعارات الجديدة فقط (التي لم يتم عرضها من قبل)
-            const newNotifications = data.filter(n => 
-              !shownNotificationsRef.current.has(n._id || n.id || '')
-            );
-            
-            if (newNotifications.length > 0) {
-              setNotifications(newNotifications);
-              setShowNotification(true);
-            }
-          } else {
-            // If API returns empty array, try localStorage
-            if (!loadNotificationsFromStorage()) {
-              setShowNotification(false);
-            }
-          }
-          setIsLoading(false);
-        })
-        .catch(apiError => {
-          console.error('API Error fetching notifications:', apiError);
-          
-          // Fallback to localStorage
-          if (!loadNotificationsFromStorage()) {
-            setShowNotification(false);
-          }
-          setIsLoading(false);
-        });
-      } catch (error) {
-        console.error('Error fetching notifications:', error);
-      // Try localStorage as a last resort
+        if (newNotifications.length > 0) {
+          console.log("New server notifications found:", newNotifications.length);
+          setNotifications(newNotifications);
+          setCurrentNotificationIndex(0);
+          setShowNotification(true);
+        }
+      } else {
+        // If API returns empty array, try localStorage
+        if (!loadNotificationsFromStorage()) {
+          setShowNotification(false);
+        }
+      }
+    } catch (error) {
+      console.error('API Error fetching notifications:', error);
+      
+      // Fallback to localStorage
       if (!loadNotificationsFromStorage()) {
         setShowNotification(false);
       }
-        setIsLoading(false);
-      }
-    };
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-  // Fetch notifications initially
+  // تنفيذ نظام التحقق المتكرر من الإشعارات الجديدة
   useEffect(() => {
     console.log("ReminderSystem: Initial load");
     
     // تهيئة قائمة الإشعارات التي تم عرضها
     shownNotificationsRef.current = new Set();
     
+    // جلب الإشعارات عند بدء التشغيل
     fetchAndUpdateNotifications();
     
-    // Force check localStorage directly on mount
+    // التحقق بشكل مباشر من localStorage عند التحميل
     loadNotificationsFromStorage();
 
-    // Refresh notifications every 5 minutes
-    const intervalId = setInterval(fetchAndUpdateNotifications, 5 * 60 * 1000);
+    // تنفيذ التحقق المتكرر (كل 10 ثوان)
+    const shortIntervalId = setInterval(fetchAndUpdateNotifications, 10 * 1000);
+    
+    // تنفيذ التحقق العميق كل 5 دقائق
+    const longIntervalId = setInterval(() => {
+      console.log("Running deep check for notifications");
+      // إعادة تعيين قائمة الإشعارات التي تم عرضها بعد فترة طويلة
+      shownNotificationsRef.current = new Set();
+      fetchAndUpdateNotifications();
+    }, 5 * 60 * 1000);
 
-    // Listen for storage changes (when admin adds new notification in a different tab)
+    // الاستماع لتغييرات التخزين المحلي (عند إضافة إشعار جديد في علامة تبويب مختلفة)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'notifications') {
         console.log("Storage changed event detected!");
@@ -154,14 +164,15 @@ const ReminderSystem = () => {
 
     window.addEventListener('storage', handleStorageChange);
     
-    // Cleanup
+    // تنظيف عند إلغاء التركيب
     return () => {
-      clearInterval(intervalId);
+      clearInterval(shortIntervalId);
+      clearInterval(longIntervalId);
       window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
 
-  // Listen for custom event for changes in the same window
+  // الاستماع للحدث المخصص للتغييرات في نفس النافذة
   useEffect(() => {
     const handleLocalChange = () => {
       console.log("localStorageChanged event detected!");
@@ -174,7 +185,39 @@ const ReminderSystem = () => {
     };
   }, []);
 
-  // Auto-hide notification after specified duration and mark as shown
+  // تنفيذ نظام "Long Polling" للتحقق من الإشعارات الجديدة
+  useEffect(() => {
+    // تنفيذ وظيفة long polling
+    const startLongPolling = async () => {
+      try {
+        // جلب الإشعارات بواسطة long polling
+        const response = await fetch(`${apiBaseUrl}/notifications/poll?timestamp=${Date.now()}`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          
+          // تحديث الإشعارات إذا كانت هناك إشعارات جديدة
+          if (data.hasNewNotifications) {
+            console.log("Long polling detected new notifications");
+            fetchAndUpdateNotifications();
+          }
+        }
+      } catch (error) {
+        console.error("Long polling error:", error);
+      } finally {
+        // إعادة بدء long polling بعد فترة قصيرة
+        setTimeout(startLongPolling, 3000);
+      }
+    };
+    
+    // بدء عملية long polling
+    startLongPolling();
+    
+    // تنظيف عند إلغاء التركيب (لن يتم تنفيذها عمليًا بسبب setTimeout)
+    return () => {};
+  }, []);
+
+  // إخفاء الإشعار تلقائيًا بعد المدة المحددة وتسجيله كإشعار تم عرضه
   useEffect(() => {
     if (showNotification && notifications.length > 0) {
       const currentNotification = notifications[currentNotificationIndex];

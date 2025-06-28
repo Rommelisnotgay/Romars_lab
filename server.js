@@ -892,25 +892,117 @@ app.get('/api/admin/protected', authenticateToken, (req, res) => {
 // Notification Routes
 app.get('/api/notifications', async (req, res) => {
   try {
+    // يمكن استخدام timestamp للتحقق فقط من الإشعارات الجديدة منذ آخر تحقق
+    const timestamp = req.query.timestamp ? parseInt(req.query.timestamp) : 0;
+    const now = new Date();
+    
     let notifications;
     if (mongoose.connection.readyState === 1) {
       // Filter only active notifications that haven't expired
-      const now = new Date();
       notifications = await Notification.find({
         active: true,
-        expiresAt: { $gt: now }
+        expiresAt: { $gt: now },
+        // تضمين الإشعارات الجديدة فقط (منذ آخر تحقق)
+        createdAt: { $gt: new Date(timestamp) }
       }).sort({ createdAt: -1 });
     } else {
       // Use in-memory notifications with filtering
-      const now = new Date();
       notifications = inMemoryNotifications
-        .filter(n => n.active && new Date(n.expiresAt) > now)
+        .filter(n => n.active && 
+                new Date(n.expiresAt) > now && 
+                new Date(n.createdAt).getTime() > timestamp)
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
     res.json(notifications);
   } catch (error) {
     console.error('Error fetching notifications:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Long polling endpoint for notifications - allows clients to wait for new notifications
+app.get('/api/notifications/poll', async (req, res) => {
+  try {
+    const timestamp = req.query.timestamp ? parseInt(req.query.timestamp) : Date.now();
+    const timeout = 25000; // 25 seconds timeout (slightly less than browser timeout)
+    const pollInterval = 1000; // Check every second
+    const maxIterations = timeout / pollInterval;
+    let iterations = 0;
+    
+    // Store the timestamp of the most recent notification for comparison
+    let lastNotificationTimestamp = 0;
+    
+    // Function to check for new notifications
+    const checkForNewNotifications = async () => {
+      const now = new Date();
+      
+      if (mongoose.connection.readyState === 1) {
+        // Check DB for new notifications since timestamp
+        const latestNotification = await Notification.findOne({
+          active: true,
+          expiresAt: { $gt: now },
+          createdAt: { $gt: new Date(timestamp) }
+        }).sort({ createdAt: -1 });
+        
+        if (latestNotification) {
+          lastNotificationTimestamp = new Date(latestNotification.createdAt).getTime();
+          return true;
+        }
+      } else {
+        // Check in-memory notifications
+        const latestNotification = inMemoryNotifications.find(n => 
+          n.active && 
+          new Date(n.expiresAt) > now && 
+          new Date(n.createdAt).getTime() > timestamp
+        );
+        
+        if (latestNotification) {
+          lastNotificationTimestamp = new Date(latestNotification.createdAt).getTime();
+          return true;
+        }
+      }
+      
+      return false;
+    };
+    
+    // Initial check
+    let hasNewNotifications = await checkForNewNotifications();
+    
+    // If no new notifications found immediately, start polling
+    if (!hasNewNotifications) {
+      // Using setTimeout recursively instead of setInterval for better timing control
+      const poll = () => {
+        return new Promise<boolean>((resolve) => {
+          setTimeout(async () => {
+            iterations++;
+            
+            // Check for new notifications
+            const newNotificationsFound = await checkForNewNotifications();
+            
+            // If found or reached max iterations, resolve
+            if (newNotificationsFound || iterations >= maxIterations) {
+              resolve(newNotificationsFound);
+            } else {
+              // Continue polling
+              resolve(await poll());
+            }
+          }, pollInterval);
+        });
+      };
+      
+      // Start polling
+      hasNewNotifications = await poll();
+    }
+    
+    // Respond with result
+    res.json({ 
+      hasNewNotifications,
+      timestamp: lastNotificationTimestamp || Date.now()
+    });
+    
+  } catch (error) {
+    console.error('Error in notifications long polling:', error);
+    res.status(500).json({ message: 'Server error', hasNewNotifications: false });
   }
 });
 
@@ -956,6 +1048,9 @@ app.post('/api/notifications', authenticateToken, isAdmin, async (req, res) => {
       
       inMemoryNotifications.push(newNotification);
     }
+    
+    // إرسال الإشعار إلى جميع المستخدمين من خلال الاستجابة للـ long polling
+    console.log("New notification created:", newNotification.title);
     
     res.status(201).json(newNotification);
   } catch (error) {
@@ -1108,6 +1203,129 @@ app.post('/api/visitor/heartbeat', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error updating visitor heartbeat:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ========== WEBSITE LIKES ROUTES ==========
+
+// In-memory website likes data (fallback when DB is unavailable)
+let websiteLikes = {
+  count: 68, // Default likes count
+  likedByIPs: new Set() // Track IPs that have liked
+};
+
+// Get website likes
+app.get('/api/website/likes', async (req, res) => {
+  try {
+    // Get visitor's IP to check if they've liked
+    const ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    
+    let likesCount = 0;
+    let hasLiked = false;
+    
+    if (mongoose.connection.readyState === 1) {
+      // Try to get likes document from DB
+      // The likes are stored in a single document with id 'website_likes'
+      const likesDoc = await mongoose.connection.db.collection('website_likes').findOne({ id: 'website_likes' });
+      
+      if (likesDoc) {
+        likesCount = likesDoc.count;
+        hasLiked = likesDoc.likedByIPs && likesDoc.likedByIPs.includes(ipAddress);
+      } else {
+        // Create document if it doesn't exist
+        await mongoose.connection.db.collection('website_likes').insertOne({
+          id: 'website_likes',
+          count: websiteLikes.count,
+          likedByIPs: []
+        });
+        likesCount = websiteLikes.count;
+      }
+    } else {
+      // Use in-memory data
+      likesCount = websiteLikes.count;
+      hasLiked = websiteLikes.likedByIPs.has(ipAddress);
+    }
+    
+    res.json({ count: likesCount, hasLiked });
+  } catch (error) {
+    console.error('Error getting website likes:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Toggle website like
+app.post('/api/website/like', async (req, res) => {
+  try {
+    // Get visitor's IP to track who has liked
+    const ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    
+    let likesCount = 0;
+    let hasLiked = false;
+    
+    if (mongoose.connection.readyState === 1) {
+      // Get current likes document
+      let likesDoc = await mongoose.connection.db.collection('website_likes').findOne({ id: 'website_likes' });
+      
+      // Create document if it doesn't exist
+      if (!likesDoc) {
+        likesDoc = {
+          id: 'website_likes',
+          count: websiteLikes.count,
+          likedByIPs: []
+        };
+        await mongoose.connection.db.collection('website_likes').insertOne(likesDoc);
+      }
+      
+      // Check if user has already liked
+      const likedByIPs = Array.isArray(likesDoc.likedByIPs) ? likesDoc.likedByIPs : [];
+      hasLiked = likedByIPs.includes(ipAddress);
+      
+      if (hasLiked) {
+        // Remove like
+        await mongoose.connection.db.collection('website_likes').updateOne(
+          { id: 'website_likes' },
+          { 
+            $inc: { count: -1 },
+            $pull: { likedByIPs: ipAddress }
+          }
+        );
+        hasLiked = false;
+        likesCount = (likesDoc.count || 0) - 1;
+      } else {
+        // Add like
+        await mongoose.connection.db.collection('website_likes').updateOne(
+          { id: 'website_likes' },
+          { 
+            $inc: { count: 1 },
+            $addToSet: { likedByIPs: ipAddress }
+          }
+        );
+        hasLiked = true;
+        likesCount = (likesDoc.count || 0) + 1;
+      }
+    } else {
+      // Use in-memory data
+      hasLiked = websiteLikes.likedByIPs.has(ipAddress);
+      
+      if (hasLiked) {
+        // Remove like
+        websiteLikes.count = Math.max(0, websiteLikes.count - 1);
+        websiteLikes.likedByIPs.delete(ipAddress);
+        hasLiked = false;
+      } else {
+        // Add like
+        websiteLikes.count += 1;
+        websiteLikes.likedByIPs.add(ipAddress);
+        hasLiked = true;
+      }
+      
+      likesCount = websiteLikes.count;
+    }
+    
+    res.json({ count: likesCount, hasLiked });
+  } catch (error) {
+    console.error('Error toggling website like:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
