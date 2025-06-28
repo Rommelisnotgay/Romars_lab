@@ -1,27 +1,62 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Phone, ThumbsUp, ArrowLeft, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
 import { Toaster } from "@/components/ui/toaster";
+import { apiClient } from "@/lib/apiClient";
 
 const Contact = () => {
-  const [likes, setLikes] = useState(() => {
-    const savedLikes = localStorage.getItem("websiteLikes");
-    return savedLikes ? parseInt(savedLikes) : 0;
-  });
-  const [hasVoted, setHasVoted] = useState(() => {
-    return localStorage.getItem("hasVoted") === "true";
-  });
+  // القيمة الثابتة للإعجابات الافتراضية
+  const DEFAULT_LIKES = 68;
+  
+  const [additionalLikes, setAdditionalLikes] = useState(0);
+  const [hasVoted, setHasVoted] = useState(false);
+  
+  // حساب إجمالي الإعجابات = الافتراضي + الإضافي
+  const totalLikes = DEFAULT_LIKES + additionalLikes;
+
+  // تحميل حالة الإعجابات عند بدء التطبيق
+  useEffect(() => {
+    // التحقق من حالة تصويت المستخدم
+    const userHasVoted = localStorage.getItem("hasVoted") === "true";
+    setHasVoted(userHasVoted);
+    
+    // تحميل عدد الإعجابات الإضافية
+    const fetchLikes = async () => {
+      try {
+        // في حالة التنفيذ الحقيقي، يمكن استخدام API
+        // const response = await apiClient.get('/website/likes');
+        // setAdditionalLikes(response.additionalLikes);
+        
+        // استخدام localStorage كبديل مؤقت
+        const savedAdditionalLikes = localStorage.getItem("websiteAdditionalLikes");
+        if (savedAdditionalLikes) {
+          setAdditionalLikes(parseInt(savedAdditionalLikes));
+        }
+      } catch (error) {
+        console.error("Error fetching website likes:", error);
+      }
+    };
+    
+    fetchLikes();
+  }, []);
 
   const handleLike = () => {
     if (!hasVoted) {
-      const newLikes = likes + 1;
-      setLikes(newLikes);
-      localStorage.setItem("websiteLikes", newLikes.toString());
+      // زيادة عدد الإعجابات الإضافية
+      const newAdditionalLikes = additionalLikes + 1;
+      setAdditionalLikes(newAdditionalLikes);
+      
+      // حفظ القيم في localStorage
+      localStorage.setItem("websiteAdditionalLikes", newAdditionalLikes.toString());
       localStorage.setItem("hasVoted", "true");
       setHasVoted(true);
+      
+      // إرسال الإعجاب إلى الخادم (في التنفيذ الحقيقي)
+      // apiClient.post('/website/like', {});
+      
       toast({
         title: "شكراً لك!",
         description: "تم تسجيل تقييمك الإيجابي بنجاح",
@@ -83,7 +118,7 @@ const Contact = () => {
                     >
                       <ThumbsUp className={`h-8 w-8 ${hasVoted ? '' : 'animate-pulse'}`} />
                     </Button>
-                    <p className="mt-2 font-medium text-lg">{likes}</p>
+                    <p className="mt-2 font-medium text-lg">{totalLikes}</p>
                     <p className="text-sm text-gray-500">إعجاب</p>
                   </div>
                 </div>

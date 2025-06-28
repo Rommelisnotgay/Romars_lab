@@ -20,7 +20,7 @@ const ReminderSystem = () => {
   const [currentNotificationIndex, setCurrentNotificationIndex] = useState(0);
   const [showNotification, setShowNotification] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   // تتبع الإشعارات التي تم عرضها بالفعل
   const shownNotificationsRef = useRef<Set<string>>(new Set());
   
@@ -75,8 +75,8 @@ const ReminderSystem = () => {
 
   // Function to fetch and filter notifications
   const fetchAndUpdateNotifications = () => {
-    try {
-      setIsLoading(true);
+      try {
+        setIsLoading(true);
       
       // Try API first
       fetch('http://localhost:5000/api/notifications')
@@ -115,15 +115,15 @@ const ReminderSystem = () => {
           }
           setIsLoading(false);
         });
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
+      } catch (error) {
+        console.error('Error fetching notifications:', error);
       // Try localStorage as a last resort
       if (!loadNotificationsFromStorage()) {
         setShowNotification(false);
       }
-      setIsLoading(false);
-    }
-  };
+        setIsLoading(false);
+      }
+    };
 
   // Fetch notifications initially
   useEffect(() => {
@@ -156,7 +156,7 @@ const ReminderSystem = () => {
       window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
-  
+
   // Listen for custom event for changes in the same window
   useEffect(() => {
     const handleLocalChange = () => {
@@ -175,7 +175,7 @@ const ReminderSystem = () => {
     if (showNotification && notifications.length > 0) {
       const currentNotification = notifications[currentNotificationIndex];
       if (!currentNotification) return;
-      
+
       // تسجيل الإشعار كإشعار تم عرضه بالفعل
       const notificationId = currentNotification._id || currentNotification.id;
       if (notificationId) {
@@ -189,7 +189,7 @@ const ReminderSystem = () => {
       const timeoutId = setTimeout(() => {
         setShowNotification(false);
       }, duration);
-      
+
       return () => clearTimeout(timeoutId);
     }
   }, [currentNotificationIndex, notifications, showNotification, DEFAULT_DISPLAY_DURATION]);
@@ -254,9 +254,9 @@ const ReminderSystem = () => {
   const handleNext = () => {
     setShowNotification(false);
     setTimeout(() => {
-      setCurrentNotificationIndex((prevIndex) => 
-        prevIndex === notifications.length - 1 ? 0 : prevIndex + 1
-      );
+    setCurrentNotificationIndex((prevIndex) => 
+      prevIndex === notifications.length - 1 ? 0 : prevIndex + 1
+    );
       setShowNotification(true);
     }, 300);
   };
@@ -265,9 +265,9 @@ const ReminderSystem = () => {
   const handlePrev = () => {
     setShowNotification(false);
     setTimeout(() => {
-      setCurrentNotificationIndex((prevIndex) => 
-        prevIndex === 0 ? notifications.length - 1 : prevIndex - 1
-      );
+    setCurrentNotificationIndex((prevIndex) => 
+      prevIndex === 0 ? notifications.length - 1 : prevIndex - 1
+    );
       setShowNotification(true);
     }, 300);
   };
@@ -297,8 +297,8 @@ const ReminderSystem = () => {
                   {getNotificationBadge(currentNotification.type)}
                 </div>
               </div>
-            </div>
-            <button
+        </div>
+        <button
               onClick={handleClose}
               className="text-gray-500 hover:text-gray-700 focus:outline-none"
               aria-label="إغلاق"
@@ -317,7 +317,7 @@ const ReminderSystem = () => {
                 <button
                   onClick={handlePrev}
                   className="px-2 py-1 bg-white rounded border hover:bg-gray-50"
-                >
+        >
                   السابق
                 </button>
                 <button
@@ -325,9 +325,9 @@ const ReminderSystem = () => {
                   className="px-2 py-1 bg-white rounded border hover:bg-gray-50"
                 >
                   التالي
-                </button>
-              </div>
-            </div>
+        </button>
+      </div>
+    </div>
           )}
         </motion.div>
       )}

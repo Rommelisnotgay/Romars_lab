@@ -84,7 +84,11 @@ const PostsPage = () => {
   const [newComment, setNewComment] = useState("");
   const [commentAuthorName, setCommentAuthorName] = useState("");
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
-  const [userLikes, setUserLikes] = useState<Record<string, boolean>>({});
+  const [userLikes, setUserLikes] = useState<Record<string, boolean>>(() => {
+    // استرجاع حالة الإعجابات من localStorage عند تحميل الصفحة
+    const savedLikes = localStorage.getItem("userPostLikes");
+    return savedLikes ? JSON.parse(savedLikes) : {};
+  });
   
   // New post state
   const [isNewPostDialogOpen, setIsNewPostDialogOpen] = useState(false);
@@ -169,8 +173,12 @@ const PostsPage = () => {
     try {
       const postId = post._id || post.id;
       
-      // Optimistic update
-      setUserLikes(prev => ({ ...prev, [postId]: !prev[postId] }));
+      // تحديث حالة الإعجابات محلياً
+      const newUserLikes = { ...userLikes, [postId]: !userLikes[postId] };
+      setUserLikes(newUserLikes);
+      
+      // حفظ حالة الإعجابات في localStorage
+      localStorage.setItem("userPostLikes", JSON.stringify(newUserLikes));
       
       // Update likes count optimistically
       setPosts(posts.map(p => {
@@ -189,8 +197,10 @@ const PostsPage = () => {
       
       // Check if the request failed
       if (!response.success && response.error) {
-        // Silently revert optimistic update on error
-        setUserLikes(prev => ({ ...prev, [postId]: !prev[postId] }));
+        // استعادة حالة الإعجابات السابقة في حالة الخطأ
+        const revertedUserLikes = { ...userLikes, [postId]: userLikes[postId] };
+        setUserLikes(revertedUserLikes);
+        localStorage.setItem("userPostLikes", JSON.stringify(revertedUserLikes));
         
         // Revert likes count
         setPosts(posts.map(p => {
@@ -207,9 +217,11 @@ const PostsPage = () => {
     } catch (error) {
       console.error("Error liking post:", error);
       
-      // Revert optimistic update on error - but don't crash the site
+      // استعادة حالة الإعجابات السابقة في حالة الخطأ
       const postId = post._id || post.id;
-      setUserLikes(prev => ({ ...prev, [postId]: !prev[postId] }));
+      const revertedUserLikes = { ...userLikes, [postId]: userLikes[postId] };
+      setUserLikes(revertedUserLikes);
+      localStorage.setItem("userPostLikes", JSON.stringify(revertedUserLikes));
       
       // Revert likes count
       setPosts(posts.map(p => {
@@ -525,13 +537,13 @@ const PostsPage = () => {
                     key={comment._id || comment.id}
                     className="bg-gray-50 p-3 rounded-lg border"
                   >
-                    <div className="flex justify-between items-start">
-                      <div className="flex items-center">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start">
+                      <div className="flex items-center flex-wrap mb-1 sm:mb-0">
                         <span className="font-medium text-sm ml-1">
                           {comment.author.name}
                         </span>
                         {comment.author.code && (
-                          <span className="text-xs border rounded-full px-2.5 py-0.5 border-gray-200">
+                          <span className="text-xs border rounded-full px-2 py-0.5 border-gray-200 mr-1">
                             #{comment.author.code}
                           </span>
                         )}
@@ -540,7 +552,7 @@ const PostsPage = () => {
                         {formatDate(comment.createdAt)}
                       </div>
                     </div>
-                    <div className="mt-2 text-gray-700">{comment.content}</div>
+                    <div className="mt-2 text-gray-700 break-words">{comment.content}</div>
                   </div>
                 ))
               )}

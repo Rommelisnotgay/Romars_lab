@@ -337,13 +337,8 @@ const AdminPosts = () => {
     try {
       const postId = selectedPost._id || selectedPost.id;
       
-      // Try API first
-      try {
-        await apiClient.delete(`/posts/${postId}/comments/${commentId}`);
-      } catch (apiError) {
-        console.error("API error:", apiError);
-        // Continue with local deletion even if API fails
-      }
+      // Call admin-specific delete endpoint
+      await apiClient.delete(`/admin/posts/${postId}/comments/${commentId}`);
 
       // Update comments list by removing the deleted comment
       setComments(comments.filter(comment => (comment._id || comment.id) !== commentId));

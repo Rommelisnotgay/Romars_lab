@@ -790,6 +790,50 @@ app.post('/api/posts/:id/comments', async (req, res) => {
   }
 });
 
+// Delete comment
+app.delete('/api/posts/:postId/comments/:commentId', async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+    
+    if (mongoose.connection.readyState === 1) {
+      const comment = await Comment.findByIdAndDelete(commentId);
+      if (!comment) return res.status(404).json({ message: 'Comment not found' });
+    } else {
+      const commentIndex = inMemoryComments.findIndex(c => (c._id === commentId || c.id === commentId) && (c.postId === postId));
+      if (commentIndex === -1) return res.status(404).json({ message: 'Comment not found' });
+      
+      inMemoryComments.splice(commentIndex, 1);
+    }
+    
+    res.json({ message: 'Comment deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting comment:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Add a specific endpoint for admin comment deletion
+app.delete('/api/admin/posts/:postId/comments/:commentId', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+    
+    if (mongoose.connection.readyState === 1) {
+      const comment = await Comment.findByIdAndDelete(commentId);
+      if (!comment) return res.status(404).json({ message: 'Comment not found' });
+    } else {
+      const commentIndex = inMemoryComments.findIndex(c => (c._id === commentId || c.id === commentId) && (c.postId === postId));
+      if (commentIndex === -1) return res.status(404).json({ message: 'Comment not found' });
+      
+      inMemoryComments.splice(commentIndex, 1);
+    }
+    
+    res.json({ message: 'Comment deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting comment:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Dashboard Statistics
 app.get('/api/admin/stats', authenticateToken, isAdmin, async (req, res) => {
   try {
@@ -1032,7 +1076,7 @@ if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => {
     // Skip API routes
     if (!req.path.startsWith('/api')) {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+    res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     }
   });
 }

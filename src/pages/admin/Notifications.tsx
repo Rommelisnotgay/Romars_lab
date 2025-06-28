@@ -95,7 +95,7 @@ const AdminNotifications = () => {
       // Try to fetch from API
       try {
         const data = await fetchWithAuth("/notifications");
-        setNotifications(data);
+      setNotifications(data);
       } catch (error) {
         console.error("API error:", error);
         // Fallback to local storage if API fails
@@ -254,17 +254,17 @@ const AdminNotifications = () => {
       // Try API first
       try {
         const response = await fetchWithAuth("/notifications", {
-          method: "POST",
-          body: JSON.stringify({
-            title,
-            content,
-            type,
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          content,
+          type,
             displayDuration: Number(displayDuration),
-          }),
-        });
-        
-        // Update notifications list
-        setNotifications([response, ...notifications]);
+        }),
+      });
+
+      // Update notifications list
+      setNotifications([response, ...notifications]);
         saveNotificationsToStorage([response, ...notifications]);
       } catch (apiError) {
         console.error("API error:", apiError);
@@ -329,21 +329,21 @@ const AdminNotifications = () => {
       // Try API first
       try {
         const response = await fetchWithAuth(`/notifications/${notificationId}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            title,
-            content,
-            type,
+        method: "PUT",
+        body: JSON.stringify({
+          title,
+          content,
+          type,
             displayDuration: Number(displayDuration),
-          }),
-        });
-        
-        // Update notifications list
-        setNotifications(
-          notifications.map((n) =>
-            (n._id || n.id) === (response._id || response.id) ? response : n
-          )
-        );
+        }),
+      });
+
+      // Update notifications list
+      setNotifications(
+        notifications.map((n) =>
+          (n._id || n.id) === (response._id || response.id) ? response : n
+        )
+      );
         saveNotificationsToStorage(
           notifications.map((n) =>
             (n._id || n.id) === (response._id || response.id) ? response : n
@@ -388,11 +388,11 @@ const AdminNotifications = () => {
       });
     } catch (error) {
       console.error("Error updating notification:", error);
-      toast({
+    toast({
         variant: "destructive",
         title: "خطأ",
         description: "فشل في تحديث الإشعار",
-      });
+    });
     } finally {
       setIsSubmitting(false);
     }
@@ -410,8 +410,8 @@ const AdminNotifications = () => {
       // Try API first
       try {
         await fetchWithAuth(`/notifications/${notificationId}`, {
-          method: "DELETE",
-        });
+        method: "DELETE",
+      });
       } catch (apiError) {
         console.error("API error:", apiError);
         // Continue with local deletion even if API fails
@@ -438,7 +438,7 @@ const AdminNotifications = () => {
         variant: "destructive",
         title: "خطأ",
         description: "فشل في حذف الإشعار",
-      });
+    });
     } finally {
       setIsSubmitting(false);
     }
@@ -706,9 +706,9 @@ const AdminNotifications = () => {
                     <SelectItem value="20">20 ثانية</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-            </div>
-          </div>
+                  </div>
+                </div>
+                </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               إلغاء
