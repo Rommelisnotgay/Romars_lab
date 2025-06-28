@@ -23,19 +23,9 @@ const AdminLogin = () => {
     try {
       console.log("Attempting login with:", { username, password });
       
-      // Call the backend API for authentication using apiClient
-      const response = await fetch('http://localhost:5000/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-
-      const data = await response.json();
+      // Use apiClient instead of direct fetch
+      const data = await apiClient.post('/auth/login', { username, password }, { withAuth: false });
       console.log("Login response:", data);
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Login failed');
-      }
 
       // Store the JWT token and user info
       localStorage.setItem("adminToken", data.token);
