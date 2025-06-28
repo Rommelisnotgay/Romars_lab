@@ -1,7 +1,9 @@
 // API Client utility for authenticated requests
 
-// Base URL for API requests
-const API_BASE_URL = 'http://localhost:5000/api';
+// Base URL for API requests - use relative URL in production
+const API_BASE_URL = window.location.hostname === 'localhost' 
+  ? 'http://localhost:5000/api' 
+  : '/api';
 
 // Helper to get auth token from local storage
 const getToken = (): string | null => {
